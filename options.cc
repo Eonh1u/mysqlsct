@@ -28,6 +28,8 @@ std::string secondary_index_prefix = "sec_index";
 
 char *host_ro = nullptr;
 char *host_rw = nullptr;
+char *host_rw2 = nullptr;
+uint port_rw2 = 0;
 char *host = nullptr;
 uint port = 0;
 uint port_rw = 0;
@@ -76,6 +78,7 @@ static const struct option long_options[] = {
     {"skip-prepare", 1, nullptr, 'K'},     {"sleep-after-fail", 1, nullptr, 'f'},
     {"port", 1, nullptr, 'R'},             {"host", 1, nullptr, 'o'},
     {"test-time", 1, &flag, 1},            {"qps", 1, &flag, 2},
+    {"host-rw2", 1, &flag, 3},             {"port-rw2", 1, &flag, 4},
     {nullptr, 0, nullptr, 0}
 };
 
@@ -185,6 +188,12 @@ bool parse_option(int argc, char *argv[]) {
           break;
         case 2 :
           test_qps = atoi(optarg);
+          break;
+        case 3:
+          host_rw2 = strdup(optarg);
+          break;
+        case 4:
+          port_rw2 = atoi(optarg);
           break;
       }
       break;

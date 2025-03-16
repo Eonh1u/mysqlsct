@@ -45,6 +45,9 @@ extern bool skip_prepare;
 extern std::string secondary_index_prefix;
 extern uint64_t test_time;
 
+extern char *host_rw2;
+extern uint port_rw2;
+
 extern TestMode test_mode;
 
 MYSQL *safe_connect(const char *host, const char *user, const char *password,
@@ -121,12 +124,12 @@ public:
 private:
   int conns_prepare();
   void conns_close();
-  int data_prepare();
+  int data_prepare(MYSQL *conn_rw, std::string db_name);
   int test_select_after_insert(const uint64_t pk);
   int commit_conn_trx(MYSQL *conn);
   int insert_test(uint64_t pk);
-  int update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value);
-  int consistency_test(uint64_t pk, uint64_t old_value, uint64_t expected);
+  int update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value, MYSQL *conn_rw, string db_name);
+  int consistency_test(uint64_t pk, uint64_t old_value, uint64_t expected, string db_name);
 
   int secondary_index_update(uint64_t &u_index_num, uint64_t &old_value,
                              uint64_t &new_value);
@@ -146,6 +149,7 @@ private:
   uint64_t m_thread_id_;
 
   MYSQL *m_conn_rw_{nullptr};
+  MYSQL *m_conn_rw2_{nullptr};
   MYSQL *m_conn_ro_{nullptr};
 };
 
@@ -165,17 +169,17 @@ void start_test(int thread_id) {
   return;
 }
 
-int TestC::data_prepare() {
+int TestC::data_prepare(MYSQL *conn_rw, string db_name) {
   int res = 0;
-  string query = "drop table if exists " + m_table_name_;
-  res = mysql_query(m_conn_rw_, query.data());
+  string query = "drop table if exists "  + db_name + "." + m_table_name_;
+  res = mysql_query(conn_rw, query.data());
   if (res != 0) {
     std::cout << "Failed to drop table, sql: " << query
-              << ", errno: " << mysql_errno(m_conn_rw_)
-              << ", errmsg: " << mysql_error(m_conn_rw_) << std::endl;
+              << ", errno: " << mysql_errno(conn_rw)
+              << ", errmsg: " << mysql_error(conn_rw) << std::endl;
   }
 
-  query = "create table " + m_table_name_ +
+  query = "create table "  + db_name + "." + m_table_name_ +
           " (id bigint not null primary key, "
           "c1 bigint, "
           "name bigint, "
@@ -183,11 +187,11 @@ int TestC::data_prepare() {
           "index_num bigint, "
           "UNIQUE INDEX u_index_num(u_index_num ASC) USING BTREE, "
           "INDEX index_num(index_num) USING BTREE)";
-  res = mysql_query(m_conn_rw_, query.data());
+  res = mysql_query(conn_rw, query.data());
   if (res != 0) {
     std::cout << "Failed to create table, sql: " << query
-              << ", errno: " << mysql_errno(m_conn_rw_)
-              << ", errmsg: " << mysql_error(m_conn_rw_) << std::endl;
+              << ", errno: " << mysql_errno(conn_rw)
+              << ", errmsg: " << mysql_error(conn_rw) << std::endl;
   }
 
   int index_num_count = 1;
@@ -198,14 +202,14 @@ int TestC::data_prepare() {
     // index_num
 
     for (int i = 0; i < 10 && pk <= m_table_size_; i++, pk++) {
-      query = "insert into " + m_table_name_ + " values(" + std::to_string(pk) +
+      query = "insert into "  + db_name + "."  + m_table_name_ + " values(" + std::to_string(pk) +
               "," + "0, 0, " + std::to_string(pk) + ", " +
               std::to_string(index_num_count) + ");";
-      res = mysql_query(m_conn_rw_, query.data());
+      res = mysql_query(conn_rw, query.data());
       if (res != 0) {
         std::cout << "Failed to insert, sql: " << query
-                  << ", errno: " << mysql_errno(m_conn_rw_)
-                  << ", errmsg: " << mysql_error(m_conn_rw_) << std::endl;
+                  << ", errno: " << mysql_errno(conn_rw)
+                  << ", errmsg: " << mysql_error(conn_rw) << std::endl;
         return res;
       }
 
@@ -219,17 +223,17 @@ int TestC::data_prepare() {
     index_num_count++;
   }
 
-  query = "select count(*) from " + m_table_name_;
-  res = mysql_query(m_conn_rw_, query.data());
+  query = "select count(*) from " + db_name + "."  + m_table_name_;
+  res = mysql_query(conn_rw, query.data());
   if (res != 0) {
     std::cout << "Failed to check the table size, errno: "
-              << mysql_errno(m_conn_rw_)
-              << ", errmsg: " << mysql_error(m_conn_rw_) << std::endl;
+              << mysql_errno(conn_rw)
+              << ", errmsg: " << mysql_error(conn_rw) << std::endl;
     return res;
   }
   MYSQL_RES *mysql_res = nullptr;
   MYSQL_ROW row;
-  mysql_res = mysql_store_result(m_conn_rw_);
+  mysql_res = mysql_store_result(conn_rw);
   row = mysql_fetch_row(mysql_res);
   if (row[0] == nullptr) {
     std::cout << "Failed to check the table size." << std::endl;
@@ -273,6 +277,24 @@ int TestC::conns_prepare() {
       std::cerr << "Failed to connect to RW."
                 << " errno: " << mysql_errno(m_conn_rw_)
                 << ",errmsg: " << mysql_error(m_conn_rw_) << std::endl;
+      res = -1;
+      break;
+    }
+
+    // Connection to RW2
+    m_conn_rw2_ = mysql_init(0);
+    if (m_conn_rw2_ == nullptr) {
+      std::cerr << "Failed to init m_conn_rw2_ " << std::endl;
+      res = -1;
+      break;
+    }
+
+    string db_name = "sct2";
+    if (!mysql_real_connect(m_conn_rw2_, host_rw2, user, password, db_name.c_str(),
+                            port_rw2, nullptr, 0)) {
+      std::cerr << "Failed to connect to RW2."
+                << " errno: " << mysql_errno(m_conn_rw2_)
+                << ",errmsg: " << mysql_error(m_conn_rw2_) << std::endl;
       res = -1;
       break;
     }
@@ -373,7 +395,7 @@ int TestC::insert_test(uint64_t pk) {
   return res;
 }
 
-int TestC::update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value) {
+int TestC::update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value, MYSQL *conn_rw, string db_name) {
   int res = 0;
   MYSQL_RES *mysql_res = nullptr;
   MYSQL_ROW row;
@@ -382,9 +404,9 @@ int TestC::update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value) {
   new_value = rand() % m_table_size_;
 
   // get max id
-  query = "select MAX(id) from " + m_table_name_;
-  res = mysql_query(m_conn_rw_, query.data());
-  mysql_res = mysql_store_result(m_conn_rw_);
+  query = "select MAX(id) from " + db_name + "." + m_table_name_;
+  res = mysql_query(conn_rw, query.data());
+  mysql_res = mysql_store_result(conn_rw);
   row = mysql_fetch_row(mysql_res);
   mysql_free_result(mysql_res);
   if (row == nullptr) {
@@ -397,18 +419,18 @@ int TestC::update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value) {
   uint64_t max_pk = strtoull(row[0], nullptr, 10);
   pk = rand() % max_pk + 1;
 
-  query = "select id, c1 from " + m_table_name_ +
+  query = "select id, c1 from " + db_name + "." + m_table_name_ +
           " where id >= " + std::to_string(pk) + " limit 1";
 
-  res = mysql_query(m_conn_rw_, query.data());
+  res = mysql_query(conn_rw, query.data());
   if (res != 0) {
     std::cout << "Failed to test consistency, sql: " << query
-              << ", errno: " << mysql_errno(m_conn_rw_)
-              << ", errmsg: " << mysql_error(m_conn_rw_);
+              << ", errno: " << mysql_errno(conn_rw)
+              << ", errmsg: " << mysql_error(conn_rw);
     return -1;
   }
 
-  mysql_res = mysql_store_result(m_conn_rw_);
+  mysql_res = mysql_store_result(conn_rw);
 
   row = mysql_fetch_row(mysql_res);
   mysql_free_result(mysql_res);
@@ -423,27 +445,27 @@ int TestC::update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value) {
   pk = old_value = strtoull(row[0], nullptr, 10);
   old_value = strtoull(row[1], nullptr, 10);
 
-  query = "update " + m_table_name_ + " set c1 = " + std::to_string(new_value) +
+  query = "update " + db_name + "."  + m_table_name_ + " set c1 = " + std::to_string(new_value) +
           " where id = " + std::to_string(pk);
 
-  res = mysql_query(m_conn_rw_, query.data());
+  res = mysql_query(conn_rw, query.data());
   if (res != 0) {
     std::cerr << "Failed to update, sql: " << query
-              << ", errno: " << mysql_errno(m_conn_rw_)
-              << ", error: " << mysql_error(m_conn_rw_);
+              << ", errno: " << mysql_errno(conn_rw)
+              << ", error: " << mysql_error(conn_rw);
   }
   return res;
 }
 
 int TestC::consistency_test(uint64_t pk, uint64_t old_value,
-                            uint64_t expected) {
+                            uint64_t expected, string db_name) {
   int res = 0;
   MYSQL_RES *mysql_res = nullptr;
   MYSQL_ROW row;
   uint64_t ro_val;
   bool failed = false;
   string query =
-      "select c1 from " + m_table_name_ + " where id = " + std::to_string(pk);
+      "select c1 from "  + db_name + "." + m_table_name_ + " where id = " + std::to_string(pk);
   do {
     res = mysql_query(m_conn_ro_, query.data());
     if (res != 0) {
@@ -519,7 +541,11 @@ int TestC::run() {
       std::cout << "thread id: " << m_thread_id_ << " data preparing." << std::endl;
     }
 
-    if ((res = data_prepare() != 0)) {
+    if ((res = data_prepare(m_conn_rw_, "sct1") != 0)) {
+      return -1;
+    }
+
+    if ((res = data_prepare(m_conn_rw2_, "sct2") != 0)) {
       return -1;
     }
   }
@@ -536,11 +562,19 @@ int TestC::run() {
     }
     state.increase_cnt_total();
 
-    sct_index_test_mode = static_cast<enum_sct_index_test_mode>(
-        rand() % (sct_index_test_mode_count));
+    // sct_index_test_mode = static_cast<enum_sct_index_test_mode>(
+    //     rand() % (sct_index_test_mode_count));
+    
+    sct_index_test_mode = PRIMARY_KEY;
+    int database_name_index = rand() % (2) + 1;
+
+    MYSQL *conn_rw = nullptr;
+    conn_rw = (database_name_index == 1) ? m_conn_rw_ : m_conn_rw2_;
+    string db_name = "sct" + std::to_string(database_name_index);
+
 
     if (sct_index_test_mode == PRIMARY_KEY) {
-      res = update(pk, old_val, new_val);
+      res = update(pk, old_val, new_val,conn_rw,db_name);
     } else if (sct_index_test_mode == UNIQUE_INDEX) {
       // update based u_index_num
       res = secondary_index_update(pk, old_val, new_val);
@@ -559,7 +593,7 @@ int TestC::run() {
     }
 
     if (sct_index_test_mode == PRIMARY_KEY) {
-      res = consistency_test(pk, old_val, new_val);
+      res = consistency_test(pk, old_val, new_val,db_name);
     } else if (sct_index_test_mode == UNIQUE_INDEX) {
       res = secondary_index_consistency_test(pk, old_val, new_val);
     } else {
