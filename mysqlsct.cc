@@ -386,6 +386,7 @@ int TestC::update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value) {
   res = mysql_query(m_conn_rw_, query.data());
   mysql_res = mysql_store_result(m_conn_rw_);
   row = mysql_fetch_row(mysql_res);
+  mysql_free_result(mysql_res);
   if (row == nullptr) {
     std::cout << "get error when " << query.data() << ", may be the table "
               << m_table_name_ << "is null";
@@ -410,6 +411,7 @@ int TestC::update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value) {
   mysql_res = mysql_store_result(m_conn_rw_);
 
   row = mysql_fetch_row(mysql_res);
+  mysql_free_result(mysql_res);
   if (row == nullptr) {
     if (detail_log) {
       std::cerr << "RW row is nullptr, expected: " << std::endl;
@@ -420,7 +422,6 @@ int TestC::update(uint64_t &pk, uint64_t &old_value, uint64_t &new_value) {
 
   pk = old_value = strtoull(row[0], nullptr, 10);
   old_value = strtoull(row[1], nullptr, 10);
-  mysql_free_result(mysql_res);
 
   query = "update " + m_table_name_ + " set c1 = " + std::to_string(new_value) +
           " where id = " + std::to_string(pk);
@@ -459,6 +460,7 @@ int TestC::consistency_test(uint64_t pk, uint64_t old_value,
     mysql_res = mysql_store_result(m_conn_ro_);
 
     row = mysql_fetch_row(mysql_res);
+    mysql_free_result(mysql_res);
     if (row == nullptr) {
       if (detail_log) {
         std::cerr << "RO row is nullptr, expected: " << expected << std::endl;
@@ -467,7 +469,6 @@ int TestC::consistency_test(uint64_t pk, uint64_t old_value,
       break;
     }
     ro_val = strtoull(row[0], nullptr, 10);
-    mysql_free_result(mysql_res);
     mysql_res = nullptr;
     if (ro_val != expected) {
       if (detail_log) {
@@ -657,6 +658,7 @@ int TestC::secondary_index_update(uint64_t &u_index_num, uint64_t &old_value,
   res = mysql_query(m_conn_rw_, query.data());
   mysql_res = mysql_store_result(m_conn_rw_);
   row = mysql_fetch_row(mysql_res);
+  mysql_free_result(mysql_res);
   if (row == nullptr) {
     std::cout << "get error when " << query.data() << ", may be the table "
               << m_table_name_ << "is null";
@@ -681,6 +683,7 @@ int TestC::secondary_index_update(uint64_t &u_index_num, uint64_t &old_value,
   mysql_res = mysql_store_result(m_conn_rw_);
 
   row = mysql_fetch_row(mysql_res);
+  mysql_free_result(mysql_res);
   if (row == nullptr) {
     if (detail_log) {
       std::cerr << "RW row is nullptr, expected: " << std::endl;
@@ -691,7 +694,6 @@ int TestC::secondary_index_update(uint64_t &u_index_num, uint64_t &old_value,
 
   u_index_num = strtoull(row[0], nullptr, 10);
   old_value = strtoull(row[1], nullptr, 10);
-  mysql_free_result(mysql_res);
 
   query = "update " + m_table_name_ +
           " set name = " + std::to_string(new_value) +
@@ -732,6 +734,7 @@ int TestC::secondary_index_consistency_test(uint64_t u_index_num,
     mysql_res = mysql_store_result(m_conn_ro_);
 
     row = mysql_fetch_row(mysql_res);
+    mysql_free_result(mysql_res);
     if (row == nullptr) {
       if (detail_log) {
         std::cerr << "RO row is nullptr, expected: " << expected << std::endl;
@@ -740,7 +743,6 @@ int TestC::secondary_index_consistency_test(uint64_t u_index_num,
       break;
     }
     ro_val = strtoull(row[0], nullptr, 10);
-    mysql_free_result(mysql_res);
     mysql_res = nullptr;
     if (ro_val != expected) {
       if (detail_log) {
@@ -795,6 +797,7 @@ int TestC::secondary_index_range_count_update(uint64_t &index_num,
 
   mysql_res = mysql_store_result(m_conn_rw_);
   row = mysql_fetch_row(mysql_res);
+  mysql_free_result(mysql_res);
   if (row == nullptr) {
     if (detail_log) {
       std::cerr << "RW row is nullptr, expected: " << std::endl;
@@ -805,7 +808,6 @@ int TestC::secondary_index_range_count_update(uint64_t &index_num,
 
   old_value = strtoull(row[0], nullptr, 10);
   // std::cout << "old value is " << old_value << std::endl;
-  mysql_free_result(mysql_res);
 
   query = "select * from " + m_table_name_ +
           " where id = " + std::to_string(update_key);
@@ -813,6 +815,7 @@ int TestC::secondary_index_range_count_update(uint64_t &index_num,
   res = mysql_query(m_conn_rw_, query.data());
   mysql_res = mysql_store_result(m_conn_rw_);
   row = mysql_fetch_row(mysql_res);
+  mysql_free_result(mysql_res);
 
   sct_index_range_test_mode = static_cast<enum_sct_index_range_test_mode>(
       rand() % sct_index_range_test_mode_count);
@@ -876,6 +879,7 @@ int TestC::secondary_index_range_count_consistency_test(uint64_t index_num,
 
     row = mysql_fetch_row(mysql_res);
     if (row == nullptr) {
+      mysql_free_result(mysql_res);
       if (expected == 0) {
         return 0;
       }
